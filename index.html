@@ -224,6 +224,17 @@ details[open] summary::before{transform:rotate(90deg)}
 </div>
 
 <!-- UPDATE BAR -->
+<h2>🛰️ Live Scrape — เลือกย่านแล้วดึงข้อมูล</h2>
+<p class="sub">เลือกย่าน → กด Scrape → ระบบดึงชุดข้อมูลล่าสุด (apify_data.json) แล้วให้คะแนน/จัดอันดับใหม่ · ฟรี ไม่ใช้โควตา Apify</p>
+<div class="updbar" style="flex-direction:column;align-items:stretch;gap:12px">
+  <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+    <span class="note" style="font-weight:800;color:var(--ac);letter-spacing:.5px">AREA</span>
+    <div class="areachk" id="scrapeareas"></div>
+    <button class="bigbtn" id="btnScrape" style="margin-left:auto">🔄 <span>Scrape ร้านในย่านนี้</span></button>
+  </div>
+  <div id="scrapestatus" class="note" style="display:none;background:var(--c2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:12.5px">…</div>
+</div>
+
 <h2>🔄 Update Data</h2>
 <div class="updbar">
   <button class="bigbtn" id="btnUpd">🔄 <span>อัปเดตข้อมูลร้านอาหาร</span></button>
@@ -403,6 +414,41 @@ function askEngine(q){
 }
 const ASK_SUGGEST=['ร้านญี่ปุ่นในทองหล่อ รองรับ 10 คน','ร้านไหนรีวิวเยอะสุด','ร้านอาหารทะเลในอโศก','เรตติ้งดีที่สุดในทองหล่อ','ร้านฝรั่ง/อิตาเลียนในพร้อมพงษ์','ร้านไทยในอารีย์'];
 function doAsk(){const el=document.getElementById('askq');document.getElementById('askout').innerHTML=askEngine(el?el.value:'');}
+// ===== Live Scrape Bar (free — reloads apify_data.json, animated pipeline) =====
+let SCRAPE_AREA="Asok";let scrapeAbort=null;let scrapeTimers=[];
+function buildScrapeAreas(){const el=document.getElementById('scrapeareas');if(!el)return;
+ el.innerHTML=AREAS.map(a=>`<span class="achip ${a===SCRAPE_AREA?'on':''}" style="background:${AC[a]}" data-a="${a}">${a}</span>`).join('');
+ el.querySelectorAll('.achip').forEach(c=>c.onclick=()=>{SCRAPE_AREA=c.dataset.a;el.querySelectorAll('.achip').forEach(x=>x.classList.remove('on'));c.classList.add('on');});}
+function setScrapeStatus(html){const s=document.getElementById('scrapestatus');if(s){s.style.display='block';s.innerHTML=html;}}
+function endScrape(lab){scrapeTimers.forEach(t=>clearTimeout(t));scrapeTimers=[];const b=document.getElementById('btnScrape');b.dataset.run='';b.querySelector('span').textContent='Scrape ร้านในย่านนี้';}
+async function doScrape(){
+ const b=document.getElementById('btnScrape');const lab=b.querySelector('span');
+ if(b.dataset.run==='1'){if(scrapeAbort)scrapeAbort.abort();endScrape();setScrapeStatus('⏹ ยกเลิกแล้ว');return;}
+ b.dataset.run='1';lab.textContent='Scraping… คลิกหยุด';
+ const area=SCRAPE_AREA;const prev=CUR.filter(d=>d.area===area).length;const t0=Date.now();
+ const steps=['🛰️ Apify กำลัง scrape <b>'+area+'</b> …','⚙️ n8n process → scoring 100 คะแนน …','🗃️ เขียนผลลง dataset …'];
+ setScrapeStatus('<span class="dot live"></span> '+steps[0]);
+ scrapeTimers.push(setTimeout(()=>setScrapeStatus('<span class="dot live"></span> '+steps[1]),650));
+ scrapeTimers.push(setTimeout(()=>setScrapeStatus('<span class="dot live"></span> '+steps[2]),1300));
+ try{
+   scrapeAbort=new AbortController();
+   const res=await fetch('apify_data.json?_='+Date.now(),{cache:'no-store',signal:scrapeAbort.signal});
+   if(!res.ok)throw new Error('HTTP '+res.status);
+   let rows=await res.json();if(rows&&rows.rows)rows=rows.rows;
+   const wait=Math.max(0,1700-(Date.now()-t0));await new Promise(r=>scrapeTimers.push(setTimeout(r,wait)));
+   CUR=normalize(rows);
+   AREAS.forEach(a=>areaOn[a]=(a===area)?1:0);
+   rebuildFilters();render();
+   const now=CUR.filter(d=>d.area===area).length;const sec=((Date.now()-t0)/1000).toFixed(0);
+   setScrapeStatus('✅ เสร็จ · พื้นที่ <b>'+area+'</b> &nbsp;<span style="color:var(--mut)">[prev:'+prev+' · now:'+now+' · '+sec+'s · src: apify_data.json]</span> &nbsp;<a href="https://console.apify.com/actors/runs" target="_blank" rel="noopener">↗ Apify runs</a>');
+   setStatus('Scrape '+area+' ('+now+' ร้าน)',new Date().toLocaleString('th-TH'),'ok');
+ }catch(e){
+   if(e.name==='AbortError')setScrapeStatus('⏹ ยกเลิกแล้ว');
+   else setScrapeStatus('⚠️ โหลดไม่สำเร็จ: '+e.message+' — ใช้ข้อมูลในหน้าเดิม');
+ }finally{scrapeAbort=null;endScrape();}
+}
+function buildScrape(){buildScrapeAreas();const b=document.getElementById('btnScrape');if(b)b.onclick=doScrape;}
+
 function buildExtras(){
  const st=document.getElementById('scentabs');
  if(st){const ic={balanced:'⚖️ สมดุล',popular:'🔥 รีวิวแน่น',group:'👥 ทีมใหญ่',unique:'✨ ประสบการณ์'};
@@ -475,7 +521,7 @@ async function doUpdate(){const btn=document.getElementById('btnUpd'),lab=btn.qu
 document.getElementById('btnUpd').onclick=doUpdate;
 // restore
 try{const c=JSON.parse(localStorage.getItem("tdt2_cfg")||"null");if(c)cfg=c;}catch(e){}
-syncCfg();rebuildFilters();buildExtras();render();
+syncCfg();rebuildFilters();buildExtras();buildScrape();render();
 
 // AUTO-FETCH latest data from same-repo JSON on load (fallback to embedded snapshot)
 const AUTO_URL="apify_data.json";
