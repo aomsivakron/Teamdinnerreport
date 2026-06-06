@@ -187,7 +187,9 @@ summary{cursor:pointer;font-weight:700;padding:8px 0;font-size:15px}
 </div>
 
 <!-- TOP 3 -->
-<h2>🏆 Top 3 Recommendation</h2>
+<h2>🏆 Top 3 Recommendation — ตามสถานการณ์</h2>
+<div class="presets" id="scentabs" style="margin-bottom:8px"></div>
+<p class="note" style="margin:-2px 0 8px">เลือกสถานการณ์เพื่อสลับคำแนะนำ Top 3 · ตาราง Top 10 ด้านล่างยังใช้น้ำหนัก "ทางการคงที่" ตามบรีฟเสมอ</p>
 <div class="cards" id="cards"></div>
 
 <!-- PER AREA WINNER -->
@@ -195,6 +197,16 @@ summary{cursor:pointer;font-weight:700;padding:8px 0;font-size:15px}
 <div class="win" id="winners"></div>
 
 <!-- TOP 10 -->
+<h2>🤖 AI Ask Box (Grounded — ตอบจาก dataset เท่านั้น)</h2>
+<p class="sub">ถามไทย/อังกฤษ ระบบกรอง+จัดอันดับจากชุดข้อมูลในหน้านี้ ไม่ดึงความรู้ภายนอก (no hallucination)</p>
+<div class="panel">
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px" id="askchips"></div>
+  <div style="display:flex;gap:8px">
+    <input id="askq" placeholder="เช่น ร้านญี่ปุ่นในอโศก รองรับ 10 คน / ร้านไหนรีวิวเยอะสุด" style="flex:1;background:#0c0e12;color:var(--tx);border:1px solid var(--line);border-radius:9px;padding:10px;font-size:13.5px">
+    <button class="bigbtn" id="askbtn">ถาม</button>
+  </div>
+  <div id="askout" style="margin-top:12px"></div>
+</div>
 <h2>📊 Top 10 Ranking (คลิกหัวคอลัมน์เพื่อจัดเรียง)</h2>
 <div class="scroll"><table id="tbl"><thead><tr>
 <th data-k="rank">#</th><th data-k="name">ร้าน</th><th data-k="area">พื้นที่</th><th data-k="food">ประเภท</th>
@@ -242,7 +254,7 @@ const AC={"Siam":"#e8590c","Ari":"#2b8a3e","Thonglor":"#9c36b5","Asok":"#1971c2"
 const AREAS=["Siam","Ari","Thonglor","Asok","Phrom Phong"];
 const SUB=[["s_rrq","Rating&Review",25],["s_group","Group",20],["s_price","Price",15],["s_travel","Travel",15],["s_complete","Data compl.",15],["s_uniq","Uniqueness",10]];
 let CUR=SNAPSHOT.slice(), areaOn={Siam:1,Ari:1,Thonglor:1,Asok:1,"Phrom Phong":1}, sortK="total",sortDir=-1;
-let cfg={mode:"snapshot",url:"",token:""};
+let cfg={mode:"url",url:"apify_data.json",token:""};
 const MAXV=Math.max(...SNAPSHOT.map(d=>d.reviews));
 
 function vfrac(p){let v=p<=300?15:p<=500?13:p<=800?10:p<=1200?7:5;return v/15;}
@@ -262,9 +274,57 @@ function chip(a){return `<span class="chip" style="background:${AC[a]||'#555'}">
 function bars(d){let h="";for(const[k,lbl,mx]of SUB){const p=Math.round(d[k]/mx*100);h+=`<div class="bar"><span class="bl">${lbl}</span><div class="bt"><div class="bf" style="width:${p}%"></div></div><span class="bv">${d[k]}</span></div>`;}return h;}
 function topcats(d){return [...SUB].map(([k,lbl,mx])=>[lbl,d[k]/mx]).sort((a,b)=>b[1]-a[1]);}
 
+// ===== Scenario tabs (affects Top 3 cards only; Top 10 stays official) =====
+const SCEN_MULT={balanced:{},popular:{s_rrq:2.4},group:{s_group:2.6},unique:{s_uniq:3.2}};
+const SCEN_LABEL={balanced:'สมดุล',popular:'รีวิวแน่น',group:'ทีมใหญ่',unique:'ประสบการณ์'};
+let SCEN='balanced';
+function scenarioRanked(r){const base={s_rrq:25,s_group:20,s_price:15,s_travel:15,s_complete:15,s_uniq:10};const m=SCEN_MULT[SCEN]||{};const out=r.map(d=>{let n=0,den=0;for(const k in base){const w=base[k]*(m[k]||1);n+=(d[k]/base[k])*w;den+=w;}return {...d,scen:Math.round(n/den*100*10)/10};});out.sort((a,b)=>b.scen-a.scen);return out;}
+
+// ===== AI Ask Box (grounded on CUR dataset only) =====
+function askEngine(q){
+ const s=(q||'').toLowerCase();
+ const areaMap=[['สยาม','Siam'],['siam','Siam'],['อารีย','Ari'],['ari','Ari'],['ทองหล่อ','Thonglor'],['thonglor','Thonglor'],['thong lo','Thonglor'],['อโศก','Asok'],['asok','Asok'],['asoke','Asok'],['พร้อมพงษ','Phrom Phong'],['phrom','Phrom Phong']];
+ let area=null;for(const[k,v]of areaMap)if(s.includes(k)){area=v;break;}
+ const cuMap=[['ไทย','Thai'],['thai','Thai'],['ญี่ปุ่น','Japanese'],['ญีปุ','Japanese'],['japan','Japanese'],['ซูชิ','Japanese'],['ราเมง','Japanese'],['เกาหลี','Korean'],['korea','Korean'],['จีน','Chinese'],['chinese','Chinese'],['ติ่มซำ','Chinese'],['อิตา','European'],['italian','European'],['พิซซ่า','European'],['สเต็ก','European'],['ฝรั่ง','European'],['western','European'],['ทะเล','Seafood'],['ซีฟู','Seafood'],['seafood','Seafood'],['คาเฟ','Cafe/Dessert'],['cafe','Cafe/Dessert'],['ขนม','Cafe/Dessert']];
+ let cu=null;for(const[k,v]of cuMap)if(s.includes(k)){cu=v;break;}
+ let intent='score';
+ if(/รีวิวเยอะ|รีวิวมาก|น่าเชื่อถือ|popular|มาแรง|คนไปเยอะ/.test(s))intent='reviews';
+ else if(/เรตติ้ง|rating|ดีที่สุด|ดีสุด|คะแนนดี/.test(s))intent='rating';
+ const priceAsk=/ถูก|ประหยัด|งบ|ราคา|cheap|บาท|฿/.test(s);
+ const gm=s.match(/(\d+)\s*คน/);
+ let res=CUR.map(d=>rescore({...d})).filter(d=>(!area||d.area===area)&&(!cu||d.food===cu));
+ if(intent==='reviews')res.sort((a,b)=>(b.reviews||0)-(a.reviews||0));
+ else if(intent==='rating')res.sort((a,b)=>(b.rating-a.rating)||((b.reviews||0)-(a.reviews||0)));
+ else res.sort((a,b)=>b.total-a.total);
+ const top=res.slice(0,5);
+ const f=[];if(area)f.push('พื้นที่ '+area);if(cu)f.push('ประเภท '+cu);
+ const head=`พบ ${res.length} ร้านที่ตรงเงื่อนไข${f.length?' ('+f.join(', ')+')':''} · จัดอันดับตาม ${intent==='reviews'?'จำนวนรีวิว':intent==='rating'?'เรตติ้ง':'คะแนนรวม'}`;
+ const notes=[];
+ if(priceAsk)notes.push('⚠️ ชุดข้อมูลนี้ (Apify/Google) ไม่มีราคาต่อหัว จึงกรองตามงบไม่ได้ — แสดงตามคะแนน/เรตติ้งแทน');
+ if(gm)notes.push('ℹ️ ทุกร้านที่แสดงรองรับกลุ่มได้ (คัดจากประเภทร้าน) — ควรยืนยันที่นั่ง '+gm[1]+' คนกับร้านก่อนไป');
+ if(/เงียบ|คุยงาน|ประชุม|quiet/.test(s))notes.push('ℹ️ ชุดนี้ไม่มีระดับเสียง จึงแนะนำตามคะแนนรวม');
+ if(!top.length)return '<p class="note">ไม่พบร้านที่ตรงเงื่อนไขในชุดข้อมูล ลองลดเงื่อนไข เช่น เอาพื้นที่หรือประเภทออก</p>';
+ const list=top.map((d,i)=>`<div class="cmpc"><h4>${i+1}. ${d.name} ${chip(d.area)}</h4><div class="note">${d.food} · ⭐${d.rating} (${(d.reviews||0).toLocaleString()} รีวิว) · คะแนน ${d.total}/100 · ${d.travel}</div><a class="evidence" href="${d.url}" target="_blank" rel="noopener">🔗 หลักฐาน</a></div>`).join('');
+ return `<p style="font-weight:700;color:var(--ac)">${head}</p>${notes.map(n=>'<p class="note">'+n+'</p>').join('')}<div class="cmp">${list}</div>`;
+}
+const ASK_SUGGEST=['ร้านญี่ปุ่นในทองหล่อ รองรับ 10 คน','ร้านไหนรีวิวเยอะสุด','ร้านอาหารทะเลในอโศก','เรตติ้งดีที่สุดในทองหล่อ','ร้านฝรั่ง/อิตาเลียนในพร้อมพงษ์','ร้านไทยในอารีย์'];
+function doAsk(){const el=document.getElementById('askq');document.getElementById('askout').innerHTML=askEngine(el?el.value:'');}
+function buildExtras(){
+ const st=document.getElementById('scentabs');
+ if(st){const ic={balanced:'⚖️ สมดุล',popular:'🔥 รีวิวแน่น',group:'👥 ทีมใหญ่',unique:'✨ ประสบการณ์'};
+  st.innerHTML=Object.keys(SCEN_LABEL).map(k=>`<button class="pbtn${k===SCEN?' on':''}" data-s="${k}">${ic[k]}</button>`).join('');
+  st.querySelectorAll('.pbtn').forEach(b=>b.onclick=()=>{SCEN=b.dataset.s;st.querySelectorAll('.pbtn').forEach(x=>x.classList.remove('on'));b.classList.add('on');render();});}
+ const ac=document.getElementById('askchips');
+ if(ac){ac.innerHTML=ASK_SUGGEST.map(q=>`<button class="pbtn" data-q="${q}">${q}</button>`).join('');
+  ac.querySelectorAll('.pbtn').forEach(b=>b.onclick=()=>{document.getElementById('askq').value=b.dataset.q;doAsk();});}
+ const ab=document.getElementById('askbtn');if(ab)ab.onclick=doAsk;
+ const aq=document.getElementById('askq');if(aq)aq.addEventListener('keydown',e=>{if(e.key==='Enter')doAsk();});
+}
+
 function render(){
  const r=ranked();const medal=["🥇","🥈","🥉"];
- cards.innerHTML=r.slice(0,3).map((d,i)=>`<div class="card"><div style="display:flex;gap:10px"><div class="medal">${medal[i]}</div><div><div class="crank">#${d.rank} · ${d.total}/100</div><h3>${d.name}</h3><div>${chip(d.area)} <span class="meta">${d.food}</span></div></div></div>
+ const sc=scenarioRanked(r);
+ cards.innerHTML=sc.slice(0,3).map((d,i)=>`<div class="card"><div style="display:flex;gap:10px"><div class="medal">${medal[i]}</div><div><div class="crank">#${i+1} · ${SCEN==='balanced'?d.total:d.scen}/100${SCEN==='balanced'?'':' · '+SCEN_LABEL[SCEN]}</div><h3>${d.name}</h3><div>${chip(d.area)} <span class="meta">${d.food}</span></div></div></div>
   <div class="kpis"><div class="kpi"><b>${d.rating}</b><span>rating (${d.rsrc})</span></div><div class="kpi"><b>${(d.reviews||0).toLocaleString()}</b><span>${(d.vsrc||'').includes('book')?'จอง':'รีวิว'}</span></div><div class="kpi"><b>฿${Math.round(d.price_from)}</b><span>เริ่มต้น/คน</span></div></div>
   ${bars(d)}<a class="evidence" href="${d.url}" target="_blank" rel="noopener">🔗 ดูหลักฐาน</a></div>`).join("")||'<p class="note">ไม่พบร้านตามตัวกรอง</p>';
  // winners per area (from current ranking)
@@ -320,7 +380,24 @@ async function doUpdate(){const btn=document.getElementById('btnUpd'),lab=btn.qu
 }
 document.getElementById('btnUpd').onclick=doUpdate;
 // restore
-try{const c=JSON.parse(localStorage.getItem("tdt2_cfg")||"null");if(c)cfg=c;const d=JSON.parse(localStorage.getItem("tdt2_data")||"null");if(d&&d.rows){CUR=d.rows;setStatus("ข้อมูลที่อัปเดต",d.time,"ok");}}catch(e){}
-syncCfg();rebuildFilters();render();
+try{const c=JSON.parse(localStorage.getItem("tdt2_cfg")||"null");if(c)cfg=c;}catch(e){}
+syncCfg();rebuildFilters();buildExtras();render();
+
+// AUTO-FETCH latest data from same-repo JSON on load (fallback to embedded snapshot)
+const AUTO_URL="apify_data.json";
+(async function autoload(){
+  try{
+    setStatus("กำลังโหลดข้อมูลล่าสุด…",document.getElementById('lastupd').textContent,"live");
+    const res=await fetch(AUTO_URL,{cache:"no-store"});
+    if(!res.ok) throw new Error("HTTP "+res.status);
+    let rows=await res.json(); if(rows.rows) rows=rows.rows;
+    if(Array.isArray(rows)&&rows.length){ CUR=normalize(rows);
+      setStatus("โหลดข้อมูลล่าสุดอัตโนมัติ ("+CUR.length+" ร้าน)",new Date().toLocaleString("th-TH"),"ok");
+      rebuildFilters();render();
+    } else throw new Error("empty");
+  }catch(e){
+    setStatus("ใช้ข้อมูล snapshot ในไฟล์","—","");
+  }
+})();
 </script>
 </body></html>
